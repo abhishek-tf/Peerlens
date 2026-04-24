@@ -1,5 +1,6 @@
 import re
 import os
+import json  # Added for saving JSON
 import tempfile
 import pdfplumber
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -7,6 +8,10 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 
 app = FastAPI(title="Dynamic Research Paper Extractor")
+
+# Define the directory where JSON files will be saved
+OUTPUT_DIR = "extracted_results"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 class ExtractionResult(BaseModel):
     title: str
@@ -22,11 +27,7 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 def get_metadata_by_font(page):
-    """
-    Dynamically identifies the Title and Authors based on font size.
-    Title = Largest font on page 1.
-    Authors = Text appearing after title with a consistent 'author' font size.
-    """
+    """Dynamically identifies the Title and Authors based on font size."""
     chars = page.chars
     if not chars:
         return "Unknown Title", []
@@ -43,7 +44,6 @@ def get_metadata_by_font(page):
         
         for size in sizes[1:4]: 
             text_block = "".join([c['text'] for c in chars if abs(round(c['size'], 2) - size) < 0.1])
-            
             names = re.findall(r'[A-Z][a-z]+(?:\s+[A-Z][a-z\.]+)+', text_block)
             
             for name in names:
@@ -51,7 +51,7 @@ def get_metadata_by_font(page):
                     if name not in potential_authors:
                         potential_authors.append(name)
             
-            if potential_authors: break # Found author block
+            if potential_authors: break 
 
     return clean_text(title), potential_authors
 
@@ -74,7 +74,6 @@ def segment_sections(full_text: str):
     header_pattern = r'\n\s*(?:(?:[IVXLC]+\.|[0-9]+\.)\s+)?([A-Z]{4,}(?:\s+[A-Z]{4,})*)'
     
     sections = {}
-    
     abstract_match = re.search(r'Abstract[—\-\s]+(.*?)(?=I\.\s+INTRODUCTION|Keywords|II\.)', full_text, re.DOTALL | re.IGNORECASE)
     if abstract_match:
         sections["ABSTRACT"] = clean_text(abstract_match.group(1))
@@ -105,21 +104,32 @@ async def process_paper(file: UploadFile = File(...)):
 
         with pdfplumber.open(tmp_path) as pdf:
             dynamic_title, dynamic_authors = get_metadata_by_font(pdf.pages[0])
-            
             for page in pdf.pages:
                 all_text += extract_smart_columns(page) + "\n"
 
         sections_dict = segment_sections(all_text)
-        
         ref_content = sections_dict.get("REFERENCES", "")
         references = [r.strip() for r in re.split(r'\[\d+\]', ref_content) if len(r) > 10]
 
-        return {
+        # Prepare the result dictionary
+        result_data = {
             "title": dynamic_title or "Untitled Document",
             "authors": dynamic_authors,
             "sections": sections_dict,
             "references": references
         }
+
+        # --- SAVING THE JSON FILE ---
+        # Create a filename based on the uploaded file (e.g., "research_paper.pdf" -> "research_paper.json")
+        base_filename = os.path.splitext(file.filename)[0]
+        json_filename = f"{base_filename}.json"
+        save_path = os.path.join(OUTPUT_DIR, json_filename)
+
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(result_data, f, indent=4, ensure_ascii=False)
+        # ----------------------------
+
+        return result_data
 
     except Exception as e:
         raise HTTPException(500, f"Extraction failed: {str(e)}")
