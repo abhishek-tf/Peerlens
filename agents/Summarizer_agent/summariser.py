@@ -1,0 +1,109 @@
+from groq import Groq
+import os
+import json
+import re
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Navigate up to project root and load .env
+project_root = Path(__file__).resolve().parent.parent.parent
+load_dotenv(dotenv_path=project_root / '.env')
+
+MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+api_key = os.getenv("GROQ_API_KEY")
+
+if not api_key:
+    raise ValueError(f"GROQ_API_KEY not found. Checked: {project_root / '.env'}")
+
+# Initialize Groq client
+client = Groq(api_key=api_key)
+
+def extract_json(text: str):
+    try:
+        return json.loads(text)
+    except Exception as e:
+        print("Direct JSON parse failed:", e)
+        match = re.search(r"\{[\s\S]*\}", text)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception as e2:
+                print("Regex JSON parse failed:", e2)
+        raise ValueError("Invalid JSON from Groq")
+
+def summarize_paper(_data=None):
+    print("\n===== SUMMARIZATION START =====")
+
+    # Sample data - replace with actual paper data
+    data = {
+  "title": "Biz Collab:An AI-enhancedintegratedplatformfor businessmanagementandteamcollaboration",
+  "abstract": "",
+  "methodology": "whe\nA. Evaluation of existing systems team\nThere are already domain-specific solutions that organiza- T\ntions have been successful in pioneering within many areas. •\nMature products like Zoho Books and QuickBooks offer\nfeatures such as customised invoicing, automatic billing, and\nexpense tracking to the benefit of small businesses in particu- •\nlar.Likewise,inventorymanagementtoolsarewellrepresented\ninOdoowithautomationandreal-timestockanalytics.Collab- •\noration: software like Slack and Microsoft Teams has proved\nsuccessful in making communication, knowledge sharing and\norganization easy for distributed teams. Over the years these O\nplatforms have grown and are supported by users, vendors\n•\nand 3rd party integration making them suitable for adoption\nin corporate settings. Furthermore, the fact that they are\nlicensed reference implementations adds extra credibility and\n•\nmakes them appropriate for both practical uses and academic\ninvestigations.\n•\nDespite their strengths, these systems operate largely in\nisolation.Amajorityoforganizationshavetorelyonmultiple\nsubscriptions to cover business operations and collaboration,\nthus causing fragmented workflows, higher costs, and cases\nof duplicated data entry [1].Integration between tools is often\nlimited or requires complex customization, making it difficult\nto achieve proper knowledge transfer across platforms [4].\ny of WhileAI-poweredassistants,suchasZoho’sZiaAIorSlack’s\nand summarization tools, provide incremental support, they are\ntory typicallyrestrictedtonarrowusecaseslikepredictiveanalytics\nare or message summarization.\n[8]. As a result, opportunities for making proper use of organi-\nning zationalknowledgesuchaslinkingfinancialinsightswithcol-\nurce laborative decision-making remain unutilized in many cases.\ne of In summary, existing systems excel at addressing individ-\nty. ual business or collaboration needs but lack the unifying\nting architecture required to bring these capabilities together. This\nding limitationcreatesinefficienciesandhighlightsthebroaderneed\ntion for integrated platforms that unify business workflows and\nsms collaborativeintelligence.Thisworkcontributestoadiscussion\ninto inthisspacebythedesignandevaluationofBizCollab.More-\ns in over, recent studies in specific business domains show similar\nmade gaps. For instance, Abdeldayem et al. [12] analyze human\nand resource management mobile applications in the Middle East\ns of andidentifythatwhiletheseappsprovideusefulfeatures,they\nment oftenoverlookcriticalrequirementssuchasusability,security,\ndge, and localization. Their findings reinforce that even domain-\ncan focused applications face adoption challenges when essential\nsues design features are missing, underscoring the importance of\nmain BizCollab’s unified and user-centered approach.\nB. Proposed System\nuces\nrate To address the fragmentation of existing business and\nage- collaboration platforms, this paper proposes BizCollab, a\neet- unified web-based system that integrates essential business\nwork management modules with intelligent collaboration features.\nUnlike current solutions that specialize in separate specific\ndomains, BizCollab is designed as an end-to-end platform\nwhereinvoicing,inventorymanagement,expenseanalytics,and\nteam collaboration come together.\niza- The business management modules in BizCollab include:\neas. • Invoice generation based on customizable templates, en-\nffer abling organizations to generate and share professional\nand invoices or receipts with minimal effort.\nicu- • Stockcontrol-stocktrackingandtransactions,lowstock\nnted alerts.\nlab- • Expense tracking and analytics accompanied by visual-\nved ization dashboards that show expense, sales, and inven-\nand tory data for better financial decision making.\nhese On the collaboration side, BizCollab supports:\ndors\n• Real-time chat and group video/audio calls powered by\ntion\nWebRTC, ensuring low-latency communication within\nare\norganizations.\nand\n• A general international message board with the latest\nmic\norganizational announcements and discussions.\n• Mindflow,anAI-poweredmind-mappingenginethatcon-\ny in\nverts user input and meeting transcripts into structured\niple\nvisual representations, enabling teams to capture and\nion,\norganize knowledge effectively.\nases\nften\ncult\n[4].\nTABLEI\nCOMPARISONOFEXISTINGPLATFO\nFeature Zoho Odoo S\nInvoiceGeneration Yes Yes\nInventoryManagement Yes Yes\nExpenseAnalytics Yes Yes(custom)\nTeamChat Basic(ZohoCliq) Moderate\nVideoCalls Limited No Limited\nMindMapping No No\nKnowledgeSharing Limited Yes(Wiki,Notes) Yes(C\nAIChatbot Yes(ZiaAI) Add-ons Limited(\nDeployment Cloud/On-Premises Cloud/On-Premises C\nTargetUsers SMEs SMEstoEnterprises Enterpris\n•\n•\n•\nFig.1. BizCollabunifiesbusinessmanagementandcollaborationtools\n• A chatbot that uses retrieval-augmented generation\n(RAG) and organizational data sources to provide rele- •\nvant, intelligent responses to user queries.\nBizCollab was implemented using a modern web-based\narchitecture. The frontend was developed with Next.js/React\nto support interactivity, while Supabase was employed for\nbackend data management and JWT for authentication and\nidentity. AI capabilities are integrated via Langchain, RAG\npipelines and FastAPI for smooth operation with LLM APIs\nlike Llama and Grok.\nWith this stack, BizCollab aims to reduce reliance on many\ndisparate platforms and improve overall speed of operations\nas well as the transfer knowledge between teams. AI-enabled •\ncomponents such as Mindflow and the context-driven chatbot\ndistinguish BizCollab from existing systems. These modules\nwere designed to support productivity and provide decision-\nsupport functionalities by structuring organizational data and\nmeeting content.\nC. Proposed System Design and Architecture •\n1) Client Layer (Frontend):\n•\n• The client layer was implemented as a single-page ap-\nplication(SPA)usingaReact-basedframeworktoensure •\nresponsiveness and modularity.\nTABLEI\nTINGPLATFORMSWITHBIZCOLLAB\nSlack MSTeams QuickBooks BizCollab\nNo No Yes Yes\nNo No Limited Yes\nNo No Yes Yes\nYes Yes No Yes\nLimited(add-ons) Yes No Yes\nNo No No Yes\nYes(Channels) Yes(SharePoint) No Yes\nLimited(Integrations) Limited(Copilot) No Yes(Integrated)\nCloud Cloud Cloud Cloud/On-Premises\nEnterprises,Startups Enterprises SMEs SMEstoEnterprises\n• Progressive enhancement techniques were incorporated,\nincluding responsive UI design and optional progressive\nweb app (PWA) support to enable offline functionality.\n2) Application Layer (Microservices):\n• Auth & Identity Service — OAuth2 / JWT, multi-tenant\nuser provisioning, single sign-on (SSO) hooks.\n• Business services :\n– Invoice Service : The invoicing service was struc-\nturedaroundatemplateenginewithlifecyclesupport\n(draft, issue, and payment stages), enabling auto-\nmated record management.\n– Inventory Service : SKUs, stock locations, transac-\ntions, reorder rules, integration endpoints.\nols\n– Expense & Analytics Service : ingestion ETL,\nreporting service, dashboard backend, forecasting\ntion models.\nele- • Collaboration Services :\n– Chat Service : real-time messaging, history store,\nased search index, message board management.\neact – MediaSignalingService:WebRTCsessionmanage-\nfor ment (signaling server) and TURN/STUN orchestra-\nand tion.\nRAG – Meeting Service : The meeting service incorporated\nAPIs scheduling, recording, and transcription pipeline in-\ntegration, consistent with recent research emphasiz-\ning the value of automated knowledge capture in\nany\ncollaboration systems.\nions\nbled • AI Services:\ntbot – Mindflow Engine : prompt pipelines, KG construc-\nules tion, graph builder, mind-map renderer (JSON).\nion- – Contextual Chatbot Service : retrieval (RAG) layer,\nand KG + vector store query, LLM orchestration, re-\nsponse provenance.\n3) Data Storage Layer:\n• RelationalDB(PostgreSQL)fortransactionaldata(users,\ninvoices, inventory transactions).\n• DocumentDB(MongoDB)forflexibledocuments:meet-\nap- ing transcripts, mindflow JSON, chat metadata.\nsure • Vector DB (Milvus / Pinecone / Weaviate) for embed-\ndings (RAG & semantic search).\nwas\nplet\n2\nThe\n•\n•\n•\nTask\norat\nthe\nused\nreco\nB. Q\nFig.2. ProposedSystemArchitecture\nM\n• Object Storage (S3 compatible) for attachments, PDFs, To\npe\naudio/video recordings.\nIn\n• Search Engine (Elasticsearch / OpenSearch) for full-text tim\nsearch across messages, invoices, docs. K\n(i\n4) AI/ML Backends:\nC\n• Large language model (LLM) inference was supported re\nC\nthrough external APIs, with optional provisions for local\nre\nhosting depending on deployment requirements. N\n• Speech-to-text (Whisper-like) or third-party transcription\nservice. A\n• Model serving infra for custom ML models used in <0.\nforecasting, anomaly detection. sign\n5) Edge & Realtime Infrastructure: tion\nH2.\n• WebRTC media plane for peer-to-peer or SFU (se-\nlectable). For larger group calls we can use SFU (e.g.,\nC.\nmediasoup, Janus) or managed services (Agora, Twilio).\nP\n• Real-timecommunicationwassupportedviaWebSocket-\nfelt\nbased infrastructure, enabling live messaging, presence\nfeed\ndetection, and synchronized interface updates.\nclar\ninte\nIII. RESULTSANDDISCUSSION\nsom\nThis section evaluates the effectiveness of BizCollab in inve\nimproving business and collaboration efficiency compared to curr\ncommonly used fragmented toolchains (e.g., Google Sheets, tuni\nWhatsApp, and standalone invoicing software).\nD.\nA. Study Design\nT\nTo examine BizCollab’s impact on task efficiency and desi\nknowledge retention, a controlled within-subjects experiment ital\nwas conducted with 10 participants. Each participant com-\npleted four sets of tasks under two conditions:\n1) Baseline condition — Using existing, fragmented tools;\n2) BizCollab condition — Using the unified prototype\nplatform.\nThe following hypotheses were tested:\n• H1: BizCollab reduces tool-switching frequency and op-\nerational time compared to fragmented workflows.\n• H2: BizCollab enhances knowledge capture and retrieval\nefficiency via its AI-driven modules.\n• H3: BizCollab improves perceived task fluidity and re-\nduces cognitive overhead.\nTasks included invoice generation, expense logging, collab-\norative decision-making, and meeting summarization using\nthe Mindflow feature. Task completion time, number of tools\nused,knowledgecaptureaccuracy,andchatbotprecisionwere\nrecorded.\nB. Quantitative",
+  "results": "TABLEII\nPILOTEVALUATIONRESULTS(N=10)\nBaseline BizCollab\nMetric Improvement\n(Fragmented) (Prototype)\nDFs, Tool-switching\n4.3apps 1.7apps ∼60%fewer\npertask\nInvoiceprocessing\ntext time(10invoices) 11.8min 7.1min ∼40%faster\nKnowledgeretention\n58% 77% +19%\n(ideacapturerate)\nChatbotresponse\n– 71% –\nrted relevance(precision)\nChatbotquery 2.0min\nocal 0.13min ∼93%faster\nresponsetime (manual)\nNote:“–”indicatesnodirectbaselineequivalentwasavailable.\ntion\nA paired-sample t-test on invoice processing times (p\nd in <0.05)confirmedthattheobservedreductionwasstatistically\nsignificant, supporting H1. Improvements in knowledge reten-\ntion also reached statistical significance (p <0.05), supporting\nH2.\n(se-\ne.g.,\nC. Observational Insights\nlio).\nParticipants reported that working within a single platform\nket-\nfelt more coherent and less mentally demanding. Qualitative\nence\nfeedback indicated that Mindflow’s visual mapping improved\nclarity and recall during meeting summarization, while the\nintegratedchatbotfacilitatedfasterdecision-making.However,\nsome participants noted response inaccuracies for complex\nb in inventory queries, suggesting incomplete data linking in the\nd to currentprototype.Thislimitationemphasizestheneedforfine-\neets, tuning retrieval pipelines and domain-specific embeddings.\nD.",
+  "conclusion": "ow’s\nThis paper presented BizCollab, an AI-assisted unified\nun-\nplatform that integrates business management and team col-\nally\nlaboration functionalities. The system demonstrates how com-\nment\nbining invoicing, analytics, and communication tools with\nd by\nLLM-based intelligence can improve workflow efficiency and\nnts.\ncontextual knowledge sharing. Preliminary evaluation indi-\ny to\ncates notable gains in task completion time and knowledge\nretention,suggestingthepotentialofunifiedAI-drivensystems\nfea- in addressing tool fragmentation. While results are promising,\ntion further large-scale and domain-specific validation is required\naaS to confirm generalizability and long-term impact.",
+  "references": [
+    "J. Sa´enz, et al., “Value creation through marketing data analytics,” tion JournalofBusinessResearch,2022. heir [2] S. Natu and M. Aparicio, “Analyzing knowledge sharing behaviors in and virtualteams:Practicalevidencefromdigitalizedworkplaces,”Journal ofInnovation&Knowledge,2022. hen",
+    "A.Yeboah,“Knowledgesharinginorganization:Asystematicreview,” and CogentBusiness&Management,2023. ws. [4] A.K.Tiwari,Z.R.Marak,etal.,“Determinantsofelectronicinvoicing technology adoption: Toward managing business information system transformation,”JournalofInnovation&Knowledge,2023.",
+    "P. Chakri, et al., “An exploratory data analysis approach for analyzing financialaccountingdata,”2023. ting [6] O. Aro, ”Predictive Analytics in Financial Management: Enhancing n an Decision-MakingandRiskManagement,”InternationalJournalofRe- searchPublicationandReviews,2024. re-",
+    "O¨. Albayrak U¨nal, B. Erkayman, and B. Usanmaz, “Applications of ment Artificial Intelligence in Inventory Management: A Systematic Review of the Literature,” International Journal of Computational Intelligence Systems,2023. irst,",
+    "G. Culot, M. Podrecca, and G. Nassimbeni, “Artificial intelligence in ated supply chain management: A systematic literature review of empirical nder studies and research directions,” Journal of Purchasing and Supply Management,2024. ross",
+    "Shannaq,B.,&Ali,O.(2025).LeveragingMachineLearningforPre- ness dictiveSustainabilityinBusinessOperations:AClassificationApproach to Optimize Sustainable Resource Management. In Sustainable Data Management: Navigating Big Data, Communication Technology, and ugh BusinessDigitalLeadership.Volume1(pp.671-682).Cham:Springer nter- NatureSwitzerland. ions [10] Y. Zhang, R. Y. K. Lau, et al., “Business chatbots with deep learning technologies: state-of-the-art, taxonomies, and future research direc- tive tions,”ArtificialIntelligenceReview,2024. user [11] B. El Bakkouri, et al., “The Role of Chatbots in Enhancing Customer Experience,”ProcediaComputerScience,2022.",
+    "Abdeldayem,M.M.,Aldulaimi,S.H.,&Al-Kaabi,H.(2024).Exploring red. essentialfeaturesfordevelopingahumanresourcemanagementmobile racy application: Insights from the middle east. International Journal of uage EngineeringBusinessManagement,16,18479790241275306.",
+    "Deloitte, “AI at a Crossroads: Building Trust as the Path to Scale,” ulti- DeloitteAsiaPacificReport,2024. ping [14] McKinsey & Company, “The Digital Tipping Point: McKinsey Global pri- SurveyResults,”2020.",
+    "S. S. Sundaram et al., “Zero Trust Architectures for Secure Cloud ero- Deployments,”IEEEAccess,2023. 16], [16] K. Bonawitz et al., “Federated Learning: Challenges, Methods, and ance FutureDirections,”IEEETrans.NeuralNetworksLearn.Syst.,2021."
+  ],
+  "metadata": {
+    "authors": [
+      "Engineering Engine",
+      "India Ind",
+      "Engineering Engineeri",
+      "India India"
+    ],
+    "publication_year": None,
+    "journal": "",
+    "doi": ""
+  }
+}
+
+    prompt = f"""Summarize the following research paper into 350 words.
+
+Rules:
+- No JSON
+- No bullet points
+- No markdown
+- Just plain text paragraph
+
+Paper:
+Title: {data["title"]}
+Abstract: {data["abstract"]}
+Methodology: {data["methodology"]}
+Results: {data["results"]}
+Conclusion: {data["conclusion"]}
+"""
+
+    try:
+        # Groq API call
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,
+            max_tokens=1024
+        )
+        
+        text = response.choices[0].message.content
+        print("Final Output:\n", text)
+        
+        return {
+            "summary": text.strip()
+        }
+        
+    except Exception as e:
+        print("Error:", e)
+        return {
+            "error": "Failed to generate summary"
+        }
