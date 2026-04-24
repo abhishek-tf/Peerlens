@@ -1,0 +1,10 @@
+{
+    "papers": [
+        {
+            "title": "Sample Paper Title",
+            "authors": ["Author 1", "Author 2"],
+            "year": 2023,
+            "journal": "Sample Journal"
+        }
+    ]
+}
