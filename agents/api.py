@@ -1,61 +1,80 @@
 import json
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
-# Import your logic functions from your script
 from citation_agent import verify_citations, analyze_claims_with_groq, generate_assessment
 
 app = FastAPI()
 
-# 1. Define what the incoming Research Paper JSON looks like
-class ResearchPaper(BaseModel):
-    title: str
-    abstract: Optional[str] = ""
-    results: Optional[str] = ""
-    conclusion: Optional[str] = ""
-    references: List[str]
+# Configuration: Path where Abhinav saves his JSON files
+EXTRACTED_FOLDER = Path("./extracted")
+
+# Response Models for documentation
+class CitationDetail(BaseModel):
+    reference_id: int
+    raw_reference: str
+    extracted_title: str
+    status: str
+    matched_paper: Optional[Dict[str, Any]] = None
+
+class ClaimAnalysis(BaseModel):
+    claim_id: int
+    claim_text: str
+    is_accurate: bool
+    confidence_score: float
+    short_reason: str
+
+class FinalAssessment(BaseModel):
+    overall_status: str
+    verified_percentage: float
+    citation_details: List[CitationDetail]
+    groq_analysis: List[ClaimAnalysis]
 
 @app.get("/")
-def read_root():
-    return {"message": "Citation Agent API is online and ready for JSON data"}
+def home():
+    return {"status": "Citation Agent Online", "folder_watched": str(EXTRACTED_FOLDER.absolute())}
 
-@app.post("/citation-agent/analyze")
-async def analyze_paper(paper: ResearchPaper):
+@app.post("/citation-agent/analyze/{paper_name}", response_model=FinalAssessment)
+async def analyze_paper_by_name(paper_name: str):
     """
-    This endpoint receives JSON data directly from your teammate's service.
+    Abhishek/Abhinav trigger this. 
+    It reads {paper_name}.json from the /extracted folder.
     """
     try:
-        # 1. Run Verification
-        # Accessing paper.references from the JSON body
-        citations = verify_citations(paper.references)
+        # Support both 'papername' and 'papername.json'
+        filename = paper_name if paper_name.endswith(".json") else f"{paper_name}.json"
+        file_path = EXTRACTED_FOLDER / filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File {filename} not found in extracted folder.")
 
-        # 2. Prepare claims for Llama (Groq)
-        claims = [
-            f"Abstract: {paper.abstract}",
-            f"Results: {paper.results}",
-            f"Conclusion: {paper.conclusion}"
-        ]
-        # Filter out empty sections
-        claims = [c for c in claims if len(c) > 10]
+        with open(file_path, "r") as f:
+            paper_data = json.load(f)
 
-        # 3. Run Llama Analysis
-        groq_results = analyze_claims_with_groq(claims)
+        # 1. Process References
+        references = paper_data.get("references", [])
+        citations_results = verify_citations(references)
 
-        # 4. Create the final response
-        final_assessment = generate_assessment(citations, claims, groq_results)
+        # 2. Extract sections for AI validation
+        # We use .get to prevent crashing if a section is missing
+        claims_to_check = []
+        for section in ["abstract", "methodology", "results", "conclusion"]:
+            content = paper_data.get(section, "")
+            if content and len(content) > 20:
+                claims_to_check.append(f"{section.capitalize()}: {content[:1000]}") # Send a good snippet
 
-        # Return the JSON directly to your teammate
-        return final_assessment
+        # 3. AI Claim Analysis
+        groq_results = analyze_claims_with_groq(claims_to_check)
+
+        # 4. Compile Final Report
+        return generate_assessment(citations_results, claims_to_check, groq_results)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent Error: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Agent Processing Error: {str(e)}")
 
-# Keep this if you still want to serve the last saved file
-@app.get("/citation-agent/last-results")
-def get_last_results():
-    results_path = Path("./results/output.json")
-    if not results_path.exists():
-        raise HTTPException(status_code=404, detail="No previous results found")
-    with open(results_path, "r") as f:
-        return json.load(f)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
