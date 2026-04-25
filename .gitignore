@@ -4,3 +4,19 @@ agents/.env
 __pycache__/
 *.pyc
 .env
+# Environments
+.venv/
+agents/.venv/
+env/
+venv/
+
+# Secrets
+.env
+agents/.env
+
+# Python junk
+__pycache__/
+*.pyc
+
+# Your local test results (Optional but highly recommended)
+results/*.json
