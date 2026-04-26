@@ -48,7 +48,6 @@ def clean_title_with_groq(raw_ref):
 
 def verify_citation_multi_source(title):
     """Checks Semantic Scholar first, then fallbacks to Crossref."""
-    # 1. Try Semantic Scholar
     try:
         ss_response = requests.get(
             SEMANTIC_SCHOLAR_API,
@@ -63,7 +62,6 @@ def verify_citation_multi_source(title):
     except Exception as e:
         logging.error(f"Semantic Scholar error: {e}")
 
-    # 2. Fallback to Crossref
     logging.info(f"🔍 Falling back to Crossref for: {title[:50]}...")
     try:
         cr_response = requests.get(
@@ -108,10 +106,10 @@ def verify_citations(references):
         time.sleep(0.5) 
     return results
 
-def analyze_claims_with_groq(claims):
+def analyze_claims_with_groq(sections_content):
     """Analyze methodology/results logic using Groq."""
     results = []
-    active_claims = [c for c in claims if c and len(c.strip()) > 10]
+    active_claims = [c for c in sections_content if c and len(c.strip()) > 10]
     
     for idx, claim in enumerate(active_claims):
         try:
@@ -157,12 +155,15 @@ def generate_assessment(citations, sections_content, groq_results):
     }
 
 if __name__ == "__main__":
-    # --- ✅ UPDATED FOR ORCHESTRATOR FOLDER STRUCTURE ---
-    EXTRACTED_FOLDER = BASE_DIR / "Extraction" / "extracted_results"
-    input_file = EXTRACTED_FOLDER / "structured_paper.json" 
+    # --- ✅ UPDATED FOR AUTOMATIC LOCAL TESTING ---
+    EXTRACTED_FOLDER = BASE_DIR / "extracted_results"
     
-    if input_file.exists():
-        logging.info(f"🚀 Manually running analysis on: {input_file}")
+    # This looks for the first JSON file it can find in the folder to test with
+    json_files = list(EXTRACTED_FOLDER.glob("*.json"))
+    
+    if json_files:
+        input_file = json_files[0]
+        logging.info(f"🚀 Testing logic on: {input_file.name}")
         with open(input_file, 'r') as f:
             paper_data = json.load(f)
             
@@ -183,5 +184,4 @@ if __name__ == "__main__":
             json.dump(report, out, indent=2)
         logging.info(f"✅ Success! Report saved at {output_path}")
     else:
-        logging.error(f"❌ File not found at: {input_file}")
-        logging.info(f"Ensure your JSON is in: {EXTRACTED_FOLDER}")
+        logging.error(f"❌ No JSON files found in {EXTRACTED_FOLDER}")

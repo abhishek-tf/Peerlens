@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 agents/.venv/
 agents/.env
 .venv/
@@ -21,8 +20,6 @@ __pycache__/
 
 # Your local test results (Optional but highly recommended)
 results/*.json
-=======
 __pycache__/
 *.pyc
 .env
->>>>>>> main

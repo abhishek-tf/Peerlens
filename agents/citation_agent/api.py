@@ -12,16 +12,26 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Peerlens Citation Agent")
 
-# --- PATH LOGIC ---
-BASE_DIR = Path(__file__).resolve().parent.parent.parent 
-EXTRACTED_FOLDER = BASE_DIR / "Extraction" / "extracted_results" 
+# --- DYNAMIC PATH LOGIC ---
+# 1. Path(__file__) is this current file (api.py)
+# 2. .resolve() gets the full absolute path
+# 3. .parents[2] goes up 3 levels: citation_agent/ -> agents/ -> Peerlens/
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+# Now it points to Peerlens/extracted_results regardless of the computer name
+EXTRACTED_FOLDER = BASE_DIR / "Extraction" / "extracted_results"
+
+logging.info(f"📍 Root Directory detected as: {BASE_DIR}")
+logging.info(f"📂 Looking for results in: {EXTRACTED_FOLDER}")
+# Ensure the folder exists so the agent doesn't crash on startup
+EXTRACTED_FOLDER.mkdir(parents=True, exist_ok=True)
 
 # --- REQUEST MODEL ---
 class OrchestratorRequest(BaseModel):
     json_file_name: str
     assessment_mode: str = "comprehensive"
 
-# --- RESPONSE MODELS (Essential for the 'response_model' to work) ---
+# --- RESPONSE MODELS ---
 class FlaggedCitation(BaseModel):
     reference_id: int
     raw_reference: str
@@ -48,26 +58,32 @@ class FinalAssessment(BaseModel):
 def home():
     return {"status": "Citation Agent Online", "port": 8003}
 
-@app.post("/api/v1/assess", response_model=FinalAssessment)
+@app.post("/api/v1/citation-report", response_model=FinalAssessment)
 async def analyze_paper(request: OrchestratorRequest):
     try:
-        # Handling filename logic
-        filename = f"{request.json_file_name}.json"
+        # 1. Handling filename logic
+        # If the user provides "file.json", we don't want "file.json.json"
+        clean_name = request.json_file_name.replace(".json", "")
+        filename = f"{clean_name}.json"
         file_path = EXTRACTED_FOLDER / filename
         
         logging.info(f"📂 Citation Agent checking: {file_path}")
 
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File {filename} not found in {EXTRACTED_FOLDER}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"File {filename} not found in {EXTRACTED_FOLDER}. Please check the folder in VS Code."
+            )
 
+        # 2. Load the JSON data
         with open(file_path, "r") as f:
             paper_data = json.load(f)
 
-        # 1. Process References
+        # 3. Process References
         references = paper_data.get("references", [])
         citations_results = verify_citations(references)
 
-        # 2. Extract sections for analysis
+        # 4. Extract sections for analysis
         sections_content = [
             paper_data.get('abstract', ''),
             paper_data.get('methodology', ''),
@@ -75,10 +91,10 @@ async def analyze_paper(request: OrchestratorRequest):
             paper_data.get('conclusion', '')
         ]
 
-        # 3. Run Analysis via the logic file
+        # 5. Run Analysis via the logic file (Groq/AI part)
         groq_results = analyze_claims_with_groq(sections_content)
         
-        # 4. Generate Final Structure
+        # 6. Generate Final Structure and return
         return generate_assessment(citations_results, sections_content, groq_results)
 
     except HTTPException as he:
