@@ -87,8 +87,7 @@ async def process_research_paper(file: UploadFile = File(...)):
             }
 
             # Map the responses back to their respective agents
-            agent_names = ["methodology", "summarizer"] # Add "citation" later
-            agent_names = ["methodology","citation"] # Add "citation", "summary" later
+            agent_names = ["methodology", "summarizer","citation"] # Add "citation" later
             
             for name, resp in zip(agent_names, responses):
                 if isinstance(resp, Exception):
