@@ -7,9 +7,13 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 
-# --- PATH CORRECTION FOR SUB-FOLDER ---
-# Since this file is now in agents/citation_agent/, we go up 3 levels to reach root
-BASE_DIR = Path(__file__).resolve().parent.parent.parent 
+# --- DYNAMIC PATH LOGIC ---
+# Since this file is in agents/citation_agent/, we go up 3 levels to reach the Peerlens root
+BASE_DIR = Path(__file__).resolve().parents[2] 
+
+# Point strictly to the Extraction/extracted_results sub-folder
+EXTRACTED_FOLDER = BASE_DIR / "Extraction" / "extracted_results"
+
 # Load .env from the current folder (agents/citation_agent/.env)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -155,10 +159,15 @@ def generate_assessment(citations, sections_content, groq_results):
     }
 
 if __name__ == "__main__":
-    # --- ✅ UPDATED FOR AUTOMATIC LOCAL TESTING ---
-    EXTRACTED_FOLDER = BASE_DIR / "extracted_results"
+    # --- FIXED: Use the centralized folder inside Extraction ---
+    # We do NOT use BASE_DIR / "extracted_results" here
     
-    # This looks for the first JSON file it can find in the folder to test with
+    logging.info(f"📍 Root: {BASE_DIR}")
+    logging.info(f"📂 Scanning: {EXTRACTED_FOLDER}")
+
+    # Ensure the folder exists inside Extraction
+    EXTRACTED_FOLDER.mkdir(parents=True, exist_ok=True)
+    
     json_files = list(EXTRACTED_FOLDER.glob("*.json"))
     
     if json_files:
@@ -178,10 +187,11 @@ if __name__ == "__main__":
         
         report = generate_assessment(citations, sections, groq_results)
         
+        # Save results in a sub-folder to keep root clean
         output_path = BASE_DIR / "results" / "final_report.json"
         output_path.parent.mkdir(exist_ok=True)
         with open(output_path, "w") as out:
             json.dump(report, out, indent=2)
         logging.info(f"✅ Success! Report saved at {output_path}")
     else:
-        logging.error(f"❌ No JSON files found in {EXTRACTED_FOLDER}")
+        logging.error(f"❌ No JSON files found in {EXTRACTED_FOLDER}. Try running Extraction first.")
