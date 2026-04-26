@@ -21,9 +21,8 @@ app.add_middleware(
 )
 
 # --- Service Registry ---
-# Update these ports based on where your teammates are running their agents
-EXTRACTION_SERVICE_URL = "http://localhost:8001/extract" 
-METHODOLOGY_AGENT_URL = "http://localhost:8000/api/v1/assess"
+EXTRACTION_SERVICE_URL = "http://localhost:8000/extract" 
+METHODOLOGY_AGENT_URL = "http://localhost:8001/api/v1/assess"
 # CITAION_AGENT_URL = "http://localhost:8002/api/v1/assess"
 # SUMMARY_AGENT_URL = "http://localhost:8003/api/v1/generate"
 
