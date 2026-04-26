@@ -18,73 +18,97 @@ GROQ_API_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
 logging.basicConfig(level=logging.INFO)
 
-def extract_references(references):
-    """Simple but robust cleaner that focuses on punctuation and spacing."""
-    extracted_titles = []
-    for ref in references:
-        # 1. Basic cleaning: remove [1], flatten newlines/spaces
-        clean_ref = re.sub(r'\[\d+\]', '', ref)
-        clean_ref = " ".join(clean_ref.split())
-        
-        # 2. Extract title within quotes
-        match = re.search(r"[“\"'']([^”\"'']+)[”\"'']", clean_ref)
-        if match:
-            title = match.group(1).strip()
-        else:
-            # Fallback: take the longest part split by common delimiters
-            parts = re.split(r'[,.!?]', clean_ref)
-            title = max(parts, key=len).strip()
-
-        # 3. ONLY remove trailing commas, dots, or dashes that confuse APIs
-        title = re.sub(r'[,\.\-]$', '', title).strip()
-        
-        # 4. Remove double spaces created by previous cleaning
-        title = title.replace("  ", " ")
-        
-        extracted_titles.append(title[:150])
-            
-    return extracted_titles
-def verify_citation_with_semantic_scholar(title):
-    """Query Semantic Scholar for paper existence."""
+def clean_title_with_groq(raw_ref):
+    """Uses AI to fix smashed words and extract a clean title for better API matching."""
+    if not GROQ_API_KEY:
+        return raw_ref
     try:
-        response = requests.get(
+        payload = {
+            "model": "llama-3.1-8b-instant",
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": "You are a research assistant. Extract ONLY the paper title from the text. Fix missing spaces. Return ONLY the title string."
+                },
+                {"role": "user", "content": raw_ref}
+            ],
+            "temperature": 0
+        }
+        res = requests.post(GROQ_API_ENDPOINT, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload)
+        if res.status_code == 200:
+            return res.json()['choices'][0]['message']['content'].strip().strip('"')
+    except Exception as e:
+        logging.error(f"Groq cleaning error: {e}")
+    return raw_ref
+
+def verify_citation_multi_source(title):
+    """Checks Semantic Scholar first, then fallbacks to Crossref."""
+    # 1. Try Semantic Scholar
+    try:
+        ss_response = requests.get(
             SEMANTIC_SCHOLAR_API,
-            params={"query": title, "limit": 1, "fields": "title,abstract,year,externalIds"},
+            params={"query": title, "limit": 1, "fields": "title,year,authors,url"},
             timeout=10
         )
-        if response.status_code == 200:
-            data = response.json()
+        if ss_response.status_code == 200:
+            data = ss_response.json()
             if data.get("total", 0) > 0:
+                logging.info(f"✅ Found on Semantic Scholar: {title[:50]}...")
                 return data["data"][0], "verified"
     except Exception as e:
         logging.error(f"Semantic Scholar error: {e}")
+
+    # 2. Fallback to Crossref
+    logging.info(f"🔍 Falling back to Crossref for: {title[:50]}...")
+    try:
+        cr_response = requests.get(
+            CROSSREF_API,
+            params={"query.bibliographic": title, "rows": 1},
+            timeout=10
+        )
+        if cr_response.status_code == 200:
+            items = cr_response.json().get("message", {}).get("items", [])
+            if items:
+                paper = items[0]
+                normalized = {
+                    "title": paper.get("title", ["Unknown"])[0],
+                    "year": paper.get("published", {}).get("date-parts", [[None]])[0][0],
+                    "url": paper.get("URL", "")
+                }
+                logging.info(f"✅ Found on Crossref: {normalized['title'][:50]}...")
+                return normalized, "verified"
+    except Exception as e:
+        logging.error(f"Crossref error: {e}")
+
     return None, "not_found"
 
 def verify_citations(references):
-    """Main loop for citation verification."""
+    """Main loop: AI cleans the title, then checks multiple sources."""
+    if not references:
+        return []
+        
     results = []
-    titles = extract_references(references)
-    for idx, (ref, title) in enumerate(zip(references, titles)):
-        logging.info(f"Checking: {title}")
-        paper, status = verify_citation_with_semantic_scholar(title)
+    for idx, ref in enumerate(references):
+        logging.info(f"Processing reference {idx+1}...")
+        clean_title = clean_title_with_groq(ref)
+        paper, status = verify_citation_multi_source(clean_title)
         
         results.append({
             "reference_id": idx + 1,
             "raw_reference": ref,
-            "extracted_title": title,
+            "ai_cleaned_title": clean_title,
             "status": status,
             "matched_paper": paper
         })
-        time.sleep(0.5) # Slight delay for API stability
+        time.sleep(0.5) 
     return results
 
 def analyze_claims_with_groq(claims):
-    """Analyze claims and return strictly structured JSON."""
+    """Analyze methodology/results logic using Groq."""
     results = []
-    if not GROQ_API_KEY:
-        return [{"error": "GROQ_API_KEY missing"}]
-
-    for idx, claim in enumerate(claims):
+    active_claims = [c for c in claims if c and len(c.strip()) > 10]
+    
+    for idx, claim in enumerate(active_claims):
         try:
             payload = {
                 "model": "llama-3.1-8b-instant",
@@ -98,28 +122,55 @@ def analyze_claims_with_groq(claims):
                 "response_format": {"type": "json_object"},
                 "temperature": 0.1
             }
-            res = requests.post(GROQ_API_ENDPOINT, 
-                                headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, 
-                                json=payload)
+            res = requests.post(GROQ_API_ENDPOINT, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload)
             if res.status_code == 200:
                 analysis = json.loads(res.json()['choices'][0]['message']['content'])
-                analysis.update({"claim_id": idx + 1, "claim_text": claim})
+                analysis.update({"claim_id": idx + 1, "claim_text": claim[:150] + "..."})
                 results.append(analysis)
         except Exception as e:
-            logging.error(f"Groq error on claim {idx}: {e}")
+            logging.error(f"Groq logic error: {e}")
     return results
 
 def generate_assessment(citations, claims, groq_results):
-    """Calculates final score and status."""
+    """Compiles the final risk report."""
     total = len(citations)
-    found = len([c for c in citations if c["status"] == "verified"])
-    percent = round((found / total * 100), 2) if total > 0 else 0
+    bad_citations = [c for c in citations if c["status"] != "verified"]
+    found_count = total - len(bad_citations)
     
+    percent = round((found_count / total * 100), 2) if total > 0 else 0
     status = "green" if percent >= 75 else "yellow" if percent >= 40 else "red"
     
+    critical_claims = [r for r in groq_results if r.get("is_accurate") is False]
+
     return {
         "overall_status": status,
+        "summary_message": f"Analyzed {total} citations. {len(bad_citations)} flags found.",
         "verified_percentage": percent,
-        "citation_details": citations,
-        "groq_analysis": groq_results
+        "total_citations_checked": total,
+        "flagged_citations": bad_citations,
+        "critical_claims": critical_claims if critical_claims else "No logical inaccuracies found"
     }
+   
+if __name__ == "__main__":
+    # --- ✅ FIXED PATH HERE: Changed 'extraction' to 'Extraction' ---
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    input_file = BASE_DIR / "Extraction" / "structured_paper.json" 
+    
+    if input_file.exists():
+        logging.info(f"🚀 Manually running analysis on: {input_file}")
+        with open(input_file, 'r') as f:
+            paper_data = json.load(f)
+            
+        citations = verify_citations(paper_data.get('references', []))
+        claims = [paper_data.get('methodology', ''), paper_data.get('results', '')]
+        groq_results = analyze_claims_with_groq(claims)
+        
+        report = generate_assessment(citations, claims, groq_results)
+        
+        output_path = BASE_DIR / "results" / "final_report.json"
+        output_path.parent.mkdir(exist_ok=True)
+        with open(output_path, "w") as out:
+            json.dump(report, out, indent=2)
+        logging.info(f"✅ Success! Report saved at {output_path}")
+    else:
+        logging.error(f"❌ File not found at: {input_file}")

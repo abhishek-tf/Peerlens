@@ -1,24 +1,30 @@
 import json
+import os
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
 from citation_agent import verify_citations, analyze_claims_with_groq, generate_assessment
 
-app = FastAPI()
+# Set up logging so we can see errors in the terminal
+logging.basicConfig(level=logging.INFO)
 
-# Configuration: Path where Abhinav saves his JSON files
-EXTRACTED_FOLDER = Path("./extracted")
+app = FastAPI(title="Peerlens Analysis API")
 
-# Response Models for documentation
-class CitationDetail(BaseModel):
+# --- PATH LOGIC UPDATED FOR ABHINAV'S FOLDER ---
+BASE_DIR = Path(__file__).resolve().parent.parent
+# ✅ FIXED: Changed "extraction" to "Extraction" to match your actual folder name
+EXTRACTED_FOLDER = BASE_DIR / "Extraction" 
+
+class FlaggedCitation(BaseModel):
     reference_id: int
     raw_reference: str
-    extracted_title: str
+    ai_cleaned_title: str 
     status: str
     matched_paper: Optional[Dict[str, Any]] = None
 
-class ClaimAnalysis(BaseModel):
+class CriticalClaim(BaseModel):
     claim_id: int
     claim_text: str
     is_accurate: bool
@@ -27,27 +33,31 @@ class ClaimAnalysis(BaseModel):
 
 class FinalAssessment(BaseModel):
     overall_status: str
+    summary_message: str
     verified_percentage: float
-    citation_details: List[CitationDetail]
-    groq_analysis: List[ClaimAnalysis]
+    total_citations_checked: int 
+    flagged_citations: List[FlaggedCitation]
+    critical_claims: Union[List[CriticalClaim], str] 
 
 @app.get("/")
 def home():
-    return {"status": "Citation Agent Online", "folder_watched": str(EXTRACTED_FOLDER.absolute())}
+    return {
+        "status": "AI Citation Agent Online", 
+        "mode": "Double-AI (Clean + Multi-Source)",
+        "folder_watched": str(EXTRACTED_FOLDER.absolute())
+    }
 
 @app.post("/citation-agent/analyze/{paper_name}", response_model=FinalAssessment)
 async def analyze_paper_by_name(paper_name: str):
-    """
-    Abhishek/Abhinav trigger this. 
-    It reads {paper_name}.json from the /extracted folder.
-    """
     try:
-        # Support both 'papername' and 'papername.json'
         filename = paper_name if paper_name.endswith(".json") else f"{paper_name}.json"
         file_path = EXTRACTED_FOLDER / filename
         
+        logging.info(f"📂 API looking for file at: {file_path}")
+
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File {filename} not found in extracted folder.")
+            # Raise this specifically so it doesn't get caught by the general Exception block
+            raise HTTPException(status_code=404, detail=f"File {filename} not found at {file_path}")
 
         with open(file_path, "r") as f:
             paper_data = json.load(f)
@@ -57,22 +67,27 @@ async def analyze_paper_by_name(paper_name: str):
         citations_results = verify_citations(references)
 
         # 2. Extract sections for AI validation
-        # We use .get to prevent crashing if a section is missing
-        claims_to_check = []
-        for section in ["abstract", "methodology", "results", "conclusion"]:
-            content = paper_data.get(section, "")
-            if content and len(content) > 20:
-                claims_to_check.append(f"{section.capitalize()}: {content[:1000]}") # Send a good snippet
+        sections_content = [
+            paper_data.get('abstract', ''),
+            paper_data.get('methodology', ''),
+            paper_data.get('results', ''),
+            paper_data.get('conclusion', '')
+        ]
 
         # 3. AI Claim Analysis
-        groq_results = analyze_claims_with_groq(claims_to_check)
+        groq_results = analyze_claims_with_groq(sections_content)
 
         # 4. Compile Final Report
-        return generate_assessment(citations_results, claims_to_check, groq_results)
+        report = generate_assessment(citations_results, sections_content, groq_results)
+        
+        return report
 
+    except HTTPException as he:
+        # Re-raise HTTP exceptions so Swagger shows 404 correctly
+        raise he
     except Exception as e:
         import traceback
-        print(traceback.format_exc())
+        logging.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Agent Processing Error: {str(e)}")
 
 if __name__ == "__main__":
