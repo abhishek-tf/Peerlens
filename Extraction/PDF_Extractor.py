@@ -12,6 +12,7 @@ def extract_research_paper_advanced(pdf_path):
         "methodology": "",
         "results": "",
         "conclusion": "",
+        
         "references": [],
         "metadata": {
             "authors": [],

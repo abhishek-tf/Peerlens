@@ -2,6 +2,8 @@ import asyncio
 import httpx
 import logging
 import os
+import json
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,7 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Service Registry ---
+
+# ORCHESTRATOR_RESULTS_DIR = Path(__file__).resolve().parent.parent / "orchestrator_results"
+# ORCHESTRATOR_RESULTS_DIR.mkdir(exist_ok=True)
+
 EXTRACTION_SERVICE_URL = "http://localhost:8000/extract" 
 METHODOLOGY_AGENT_URL = "http://localhost:8001/api/v1/assess"
 # CITAION_AGENT_URL = "http://localhost:8002/api/v1/assess"
@@ -51,7 +56,8 @@ async def process_research_paper(file: UploadFile = File(...)):
             # Your extraction team member's code saves the file. 
             # We need to know what filename they used.
             # Assuming the API returns the filename without extension:
-            file_id = os.path.splitext(file.filename)[0]
+            upload_name = file.filename or "uploaded.pdf"
+            file_id = os.path.splitext(upload_name)[0]
             logger.info(f"✅ Extraction complete. JSON created: {file_id}.json")
 
             # --- PHASE 2: AGENT ORCHESTRATION ---
@@ -88,10 +94,24 @@ async def process_research_paper(file: UploadFile = File(...)):
             for name, resp in zip(agent_names, responses):
                 if isinstance(resp, Exception):
                     results["reports"][name] = {"error": f"Agent unreachable: {str(resp)}"}
-                elif resp.status_code != 200:
-                    results["reports"][name] = {"error": f"Agent error: {resp.text}"}
+                    continue
+
+                if not isinstance(resp, httpx.Response):
+                    results["reports"][name] = {"error": "Agent returned an unexpected response type."}
+                    continue
+
+                agent_response = resp
+                if agent_response.status_code != 200:
+                    results["reports"][name] = {"error": f"Agent error: {agent_response.text}"}
                 else:
-                    results["reports"][name] = resp.json()
+                    results["reports"][name] = agent_response.json()
+
+            # --- PHASE 4: SAVE RESULTS ---
+            # Save the full orchestrator response to a JSON file
+            output_file_path = ORCHESTRATOR_RESULTS_DIR / f"{file_id}_orchestrator_result.json"
+            with open(output_file_path, "w", encoding="utf-8") as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+            logger.info(f"💾 Orchestrator results saved: {output_file_path}")
 
             return results
 
