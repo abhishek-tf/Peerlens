@@ -7,8 +7,12 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# --- PATH CORRECTION FOR SUB-FOLDER ---
+# Since this file is now in agents/citation_agent/, we go up 3 levels to reach root
+BASE_DIR = Path(__file__).resolve().parent.parent.parent 
+# Load .env from the current folder (agents/citation_agent/.env)
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # Constants
@@ -21,6 +25,7 @@ logging.basicConfig(level=logging.INFO)
 def clean_title_with_groq(raw_ref):
     """Uses AI to fix smashed words and extract a clean title for better API matching."""
     if not GROQ_API_KEY:
+        logging.warning("⚠️ No Groq API Key found. Skipping AI cleaning.")
         return raw_ref
     try:
         payload = {
@@ -131,7 +136,7 @@ def analyze_claims_with_groq(claims):
             logging.error(f"Groq logic error: {e}")
     return results
 
-def generate_assessment(citations, claims, groq_results):
+def generate_assessment(citations, sections_content, groq_results):
     """Compiles the final risk report."""
     total = len(citations)
     bad_citations = [c for c in citations if c["status"] != "verified"]
@@ -150,11 +155,11 @@ def generate_assessment(citations, claims, groq_results):
         "flagged_citations": bad_citations,
         "critical_claims": critical_claims if critical_claims else "No logical inaccuracies found"
     }
-   
+
 if __name__ == "__main__":
-    # --- ✅ FIXED PATH HERE: Changed 'extraction' to 'Extraction' ---
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    input_file = BASE_DIR / "Extraction" / "structured_paper.json" 
+    # --- ✅ UPDATED FOR ORCHESTRATOR FOLDER STRUCTURE ---
+    EXTRACTED_FOLDER = BASE_DIR / "Extraction" / "extracted_results"
+    input_file = EXTRACTED_FOLDER / "structured_paper.json" 
     
     if input_file.exists():
         logging.info(f"🚀 Manually running analysis on: {input_file}")
@@ -162,10 +167,15 @@ if __name__ == "__main__":
             paper_data = json.load(f)
             
         citations = verify_citations(paper_data.get('references', []))
-        claims = [paper_data.get('methodology', ''), paper_data.get('results', '')]
-        groq_results = analyze_claims_with_groq(claims)
+        sections = [
+            paper_data.get('abstract', ''),
+            paper_data.get('methodology', ''),
+            paper_data.get('results', ''),
+            paper_data.get('conclusion', '')
+        ]
+        groq_results = analyze_claims_with_groq(sections)
         
-        report = generate_assessment(citations, claims, groq_results)
+        report = generate_assessment(citations, sections, groq_results)
         
         output_path = BASE_DIR / "results" / "final_report.json"
         output_path.parent.mkdir(exist_ok=True)
@@ -174,3 +184,4 @@ if __name__ == "__main__":
         logging.info(f"✅ Success! Report saved at {output_path}")
     else:
         logging.error(f"❌ File not found at: {input_file}")
+        logging.info(f"Ensure your JSON is in: {EXTRACTED_FOLDER}")
