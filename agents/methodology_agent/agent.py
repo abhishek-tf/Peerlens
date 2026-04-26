@@ -1,240 +1,234 @@
 import os
 import logging
 import asyncio
+import json
 from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
 from dotenv import load_dotenv
- 
-from models import (
-    PaperInput, AssessmentResult, ResearchDomain, StudyType,
-    ComponentScore, ReproducibilityAssessment, MethodologicalRigor
-)
-from llm_assessor import LLMAssessor
- 
+from groq import AsyncGroq
+
 # Setup professional logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
- 
+
 load_dotenv()
- 
-class StreamlinedMethodologyAssessmentAgent:
-    def __init__(self, 
-                 groq_api_key: Optional[str] = None,
-                 use_llm: bool = True):
+
+
+class PaperInput(BaseModel):
+    title: str
+    abstract: str
+    methodology: str
+    results: Optional[str] = None
+    conclusion: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def from_raw_json(cls, data: Dict[str, Any]):
+        sections = data.get("sections", {})
         
+        def get_content(primary_key, fallback_list):
+            content = data.get(primary_key.lower())
+            if content: return content
+            for fb in fallback_list:
+                content = data.get(fb.lower())
+                if content: return content
+            section_keys = {k.upper(): v for k, v in sections.items()}
+            if primary_key.upper() in section_keys:
+                return section_keys[primary_key.upper()]
+            for fb in fallback_list:
+                if fb.upper() in section_keys:
+                    return section_keys[fb.upper()]
+            return ""
+
+        return cls(
+            title=data.get("title", "Unknown Title"),
+            abstract=get_content("abstract", ["intro", "introduction"]),
+            methodology=get_content("methodology", ["methods", "materials and methods", "experimental setup"]),
+            results=get_content("results", ["findings", "evaluation"]),
+            conclusion=get_content("conclusion", ["conclusions", "discussion"]),
+            metadata=data.get("metadata", {})
+        )
+
+class ComponentScore(BaseModel):
+    score: float
+    feedback: str
+    issues: List[str] = []
+    strengths: List[str] = []
+
+class ReproducibilityAssessment(BaseModel):
+    overall_score: float
+    clarity: ComponentScore
+    completeness: ComponentScore
+    resource_availability: ComponentScore
+    replicability: ComponentScore
+
+class MethodologicalRigor(BaseModel):
+    overall_score: float
+    study_design: ComponentScore
+    sample_adequacy: ComponentScore
+    evaluation_validity: ComponentScore
+    statistical_rigor: ComponentScore
+
+class AssessmentResult(BaseModel):
+    metadata: Dict[str, Any]
+    reproducibility_assessment: ReproducibilityAssessment
+    methodological_rigor: MethodologicalRigor
+    identified_strengths: List[str]
+    identified_weaknesses: List[str]
+    recommendations: List[str]
+    confidence_score: float
+
+
+
+class LLMAssessor:
+    def __init__(self, groq_api_key: str):
+        self.groq_client = AsyncGroq(api_key=groq_api_key)
+        logger.info("✅ Async Groq client initialized")
+
+    async def comprehensive_assessment(self, 
+                                paper: PaperInput,
+                                pre_extracted_components: Optional[Dict[str, Any]] = None,
+                                assessment_mode: str = "comprehensive") -> Dict[str, Any]:
+        prompt = self._create_comprehensive_prompt(paper, pre_extracted_components, assessment_mode)
+        return await self._assess_with_groq(prompt)
+
+    def _create_comprehensive_prompt(self, paper: PaperInput, pre_extracted_components: Optional[Dict[str, Any]], assessment_mode: str) -> str:
+        prompt = f"""You are an expert research methodology reviewer. Perform a comprehensive analysis.
+Paper Content:
+Title: {paper.title}
+Abstract: {paper.abstract}
+Methodology: {paper.methodology}
+Results: {paper.results or 'Not provided'}
+Conclusion: {paper.conclusion or 'Not provided'}
+"""
+        if pre_extracted_components:
+            prompt += f"\nPre-extracted Components:\n{json.dumps(pre_extracted_components, indent=2)}\n"
+
+        prompt += """
+**Required JSON Output Format:**
+{
+    "classification": {"domain": "str", "study_type": "str", "reasoning": "str"},
+    "extracted_components": {"sample_info": {"sample_size": 0}, "tools_technologies": [], "evaluation_metrics": [], "statistical_methods": []},
+    "reproducibility": {
+        "overall_score": 0, "clarity_score": 0, "completeness_score": 0, "resource_availability_score": 0, "replicability_score": 0,
+        "clarity_feedback": "str", "clarity_issues": [], "clarity_strengths": [],
+        "completeness_feedback": "str", "completeness_issues": [], "completeness_strengths": [],
+        "resource_availability_feedback": "str", "missing_resources": [], "available_resources": [],
+        "replicability_feedback": "str", "replicability_issues": [], "replicability_strengths": []
+    },
+    "methodological_rigor": {
+        "overall_score": 0, "study_design_score": 0, "sample_adequacy_score": 0, "evaluation_validity_score": 0, "statistical_rigor_score": 0,
+        "study_design_feedback": "str", "design_strengths": [], "design_weaknesses": [],
+        "sample_adequacy_feedback": "str", "sample_strengths": [], "sample_concerns": [],
+        "evaluation_validity_feedback": "str", "evaluation_strengths": [], "evaluation_issues": [],
+        "statistical_rigor_feedback": "str", "statistical_strengths": [], "statistical_issues": []
+    },
+    "overall_assessment": {
+        "key_strengths": [], "critical_weaknesses": [], "actionable_recommendations": [], "confidence_level": 0.0, "overall_quality": "str"
+    }
+}
+Respond ONLY with JSON."""
+        return prompt
+
+    async def _assess_with_groq(self, prompt: str) -> Dict[str, Any]:
+        try:
+            chat_completion = await self.groq_client.chat.completions.create(
+                messages=[{"role": "system", "content": "You are a research reviewer. Return valid JSON."},
+                          {"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(chat_completion.choices[0].message.content)
+        except Exception as e:
+            raise Exception(f"Groq API error: {str(e)}")
+
+    async def quick_assessment(self, paper: PaperInput) -> Dict[str, Any]:
+        prompt = f"Quick assessment of {paper.title}. Provide JSON with domain, reproducibility_score, rigor_score."
+        try:
+            chat_completion = await self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                response_format={"type": "json_object"}
+            )
+            return json.loads(chat_completion.choices[0].message.content)
+        except Exception as e:
+            raise Exception(f"Quick assessment failed: {str(e)}")
+
+
+class StreamlinedMethodologyAssessmentAgent:
+    def __init__(self, groq_api_key: Optional[str] = None, use_llm: bool = True):
         self.use_llm = use_llm
         self.llm_assessor = None
         
         if use_llm:
             groq_key = groq_api_key or os.getenv('GROQ_API_KEY')
             if groq_key:
-                try:
-                    self.llm_assessor = LLMAssessor(groq_key)
-                    logger.info("🤖 LLM-First mode: Intelligent assessment enabled")
-                except Exception as e:
-                    logger.error(f"⚠️  LLM initialization failed: {e}")
-                    logger.warning("📋 Falling back to rule-based assessment")
-                    self.use_llm = False
+                self.llm_assessor = LLMAssessor(groq_key)
+                logger.info("🤖 LLM-First mode: Intelligent assessment enabled")
             else:
-                logger.warning("📋 No API key provided, using rule-based assessment")
+                logger.warning("📋 No API key, using rule-based assessment")
                 self.use_llm = False
-        else:
-            logger.info("📋 Rule-based assessment mode")
-    
-    async def assess(self, 
-               paper: PaperInput, 
-               pre_extracted_components: Optional[Dict[str, Any]] = None,
-               assessment_mode: str = "comprehensive") -> AssessmentResult:
+
+    async def assess(self, paper: PaperInput, pre_extracted_components: Optional[Dict[str, Any]] = None, assessment_mode: str = "comprehensive") -> AssessmentResult:
         logger.info(f"🔍 Analyzing: {paper.title[:50]}...")
-        
         if self.use_llm and self.llm_assessor:
             try:
-                return await self._llm_comprehensive_assessment(
-                    paper, pre_extracted_components, assessment_mode
-                )
+                llm_result = await self.llm_assessor.comprehensive_assessment(paper, pre_extracted_components, assessment_mode)
+                return self._convert_llm_to_assessment_result(llm_result, paper)
             except Exception as e:
                 logger.error(f"❌ LLM assessment failed: {e}")
-                return self._rule_based_fallback(paper, pre_extracted_components)
-        else:
-            return self._rule_based_fallback(paper, pre_extracted_components)
-    
-    async def _llm_comprehensive_assessment(self, 
-                                    paper: PaperInput,
-                                    pre_extracted_components: Optional[Dict[str, Any]],
-                                    assessment_mode: str) -> AssessmentResult:
-        llm_result = await self.llm_assessor.comprehensive_assessment(
-            paper=paper,
-            pre_extracted_components=pre_extracted_components,
-            assessment_mode=assessment_mode
-        )
-        return self._convert_llm_to_assessment_result(llm_result, paper)
-    
-    def _rule_based_fallback(self, 
-                           paper: PaperInput,
-                           pre_extracted_components: Optional[Dict[str, Any]]) -> AssessmentResult:
-        logger.warning("📋 Using minimal rule-based backup assessment...")
-        
-        methodology_words = len(paper.methodology.split()) if paper.methodology else 0
-        has_results = bool(paper.results and len(paper.results.strip()) > 50)
-        
-        base_score = 30
-        if methodology_words > 100: base_score += 10
-        if has_results: base_score += 10
-        
-        repro_score = min(60, base_score)
-        rigor_score = min(55, base_score - 5)
-        
-        # Recommendations logic for fallback
-        fallback_recommendations = []
-        if methodology_words < 100:
-            fallback_recommendations.append("Provide more detailed methodology description")
-        if not has_results:
-            fallback_recommendations.append("Include comprehensive results section")
-            
-        if not fallback_recommendations:
-            fallback_recommendations = ["Consider LLM-based assessment for detailed analysis"]
-        
-        reproducibility = ReproducibilityAssessment(
-            overall_score=repro_score,
-            clarity=ComponentScore(score=repro_score, feedback="Limited analysis", issues=[], strengths=[]),
-            completeness=ComponentScore(score=repro_score, feedback="Limited analysis", issues=[], strengths=[]),
-            resource_availability=ComponentScore(score=0, feedback="Not assessed", issues=[], strengths=[]),
-            replicability=ComponentScore(score=repro_score, feedback="Limited analysis", issues=[], strengths=[])
-        )
-        
-        methodological_rigor = MethodologicalRigor(
-            overall_score=rigor_score,
-            study_design=ComponentScore(score=rigor_score, feedback="Limited analysis", issues=[], strengths=[]),
-            sample_adequacy=ComponentScore(score=rigor_score, feedback="Limited analysis", issues=[], strengths=[]),
-            evaluation_validity=ComponentScore(score=rigor_score, feedback="Limited analysis", issues=[], strengths=[]),
-            statistical_rigor=ComponentScore(score=rigor_score, feedback="Limited analysis", issues=[], strengths=[])
-        )
+                return self._rule_based_fallback(paper)
+        return self._rule_based_fallback(paper)
+
+    def _convert_llm_to_assessment_result(self, llm_result: Dict[str, Any], paper: PaperInput) -> AssessmentResult:
+        repro = llm_result.get('reproducibility', {})
+        rigor = llm_result.get('methodological_rigor', {})
+        overall = llm_result.get('overall_assessment', {})
         
         return AssessmentResult(
-            metadata={"assessment_method": "Rule-based fallback"},
-            reproducibility_assessment=reproducibility,
-            methodological_rigor=methodological_rigor,
-            identified_strengths=["Paper structure present"],
-            identified_weaknesses=["Limited rule-based analysis"],
-            recommendations=fallback_recommendations,
-            confidence_score=0.2
-        )
-    
-    def _convert_llm_to_assessment_result(self, 
-                                        llm_result: Dict[str, Any],
-                                        paper: PaperInput) -> AssessmentResult:
-        """Corrected: Maps dictionary keys from LLM response to AssessmentResult object"""
-        repro_data = llm_result['reproducibility']
-        rigor_data = llm_result['methodological_rigor']
-        overall_data = llm_result['overall_assessment']
-        classification_data = llm_result['classification']
-        extraction_data = llm_result['extracted_components']
-        
-        reproducibility = ReproducibilityAssessment(
-            overall_score=repro_data['overall_score'],
-            clarity=ComponentScore(score=repro_data['clarity_score'], feedback=repro_data['clarity_feedback'], issues=repro_data.get('clarity_issues', []), strengths=repro_data.get('clarity_strengths', [])),
-            completeness=ComponentScore(score=repro_data['completeness_score'], feedback=repro_data['completeness_feedback'], issues=repro_data.get('completeness_issues', []), strengths=repro_data.get('completeness_strengths', [])),
-            resource_availability=ComponentScore(score=repro_data['resource_availability_score'], feedback=repro_data['resource_availability_feedback'], issues=repro_data.get('missing_resources', []), strengths=repro_data.get('available_resources', [])),
-            replicability=ComponentScore(score=repro_data['replicability_score'], feedback=repro_data['replicability_feedback'], issues=repro_data.get('replicability_issues', []), strengths=repro_data.get('replicability_strengths', []))
-        )
-        
-        methodological_rigor = MethodologicalRigor(
-            overall_score=rigor_data['overall_score'],
-            study_design=ComponentScore(score=rigor_data['study_design_score'], feedback=rigor_data['study_design_feedback'], issues=rigor_data.get('design_weaknesses', []), strengths=rigor_data.get('design_strengths', [])),
-            sample_adequacy=ComponentScore(score=rigor_data['sample_adequacy_score'], feedback=rigor_data['sample_adequacy_feedback'], issues=rigor_data.get('sample_concerns', []), strengths=rigor_data.get('sample_strengths', [])),
-            evaluation_validity=ComponentScore(score=rigor_data['evaluation_validity_score'], feedback=rigor_data['evaluation_validity_feedback'], issues=rigor_data.get('evaluation_issues', []), strengths=rigor_data.get('evaluation_strengths', [])),
-            statistical_rigor=ComponentScore(score=rigor_data['statistical_rigor_score'], feedback=rigor_data['statistical_rigor_feedback'], issues=rigor_data.get('statistical_issues', []), strengths=rigor_data.get('statistical_strengths', []))
-        )
-        
-        return AssessmentResult(
-            metadata={
-                "classified_domain": classification_data['domain'],
-                "study_type": classification_data['study_type'],
-                "assessment_method": "LLM Comprehensive",
-                "extracted_components": extraction_data
-            },
-            reproducibility_assessment=reproducibility,
-            methodological_rigor=methodological_rigor,
-            identified_strengths=overall_data.get('key_strengths', []),
-            identified_weaknesses=overall_data.get('critical_weaknesses', []),
-            recommendations=overall_data.get('actionable_recommendations', []), # Correctly pulling from dictionary
-            confidence_score=overall_data.get('confidence_level', 0.8)
-        )
-    
-    async def quick_assess(self, paper: PaperInput) -> dict:
-        """Quick Async assessment - LLM or rule-based"""
-        if self.use_llm and self.llm_assessor:
-            try:
-                return await self.llm_assessor.quick_assessment(paper)
-            except Exception as e:
-                logger.error(f"❌ Quick LLM assessment failed: {e}")
-                return self._quick_rule_based(paper)
-        else:
-            return self._quick_rule_based(paper)
-    
-    def _quick_rule_based(self, paper: PaperInput) -> dict:
-        """Quick rule-based assessment"""
-        methodology_words = len(paper.methodology.split()) if paper.methodology else 0
-        has_results = bool(paper.results and len(paper.results.strip()) > 50)
-        
-        base_score = 30
-        if methodology_words > 100: base_score += 15
-        if has_results: base_score += 10
-        
-        return {
-            "domain": "Unknown",
-            "study_type": "Unknown",
-            "reproducibility_score": min(60, base_score),
-            "rigor_score": min(55, base_score - 5),
-            "sample_size": None,
-            "key_tools": [],
-            "main_strengths": ["Paper structure present"],
-            "main_weaknesses": ["Limited rule-based analysis"],
-            "quick_recommendations": ["Use LLM assessment for detailed analysis"],
-            "overall_quality": "Fair" if base_score > 40 else "Poor",
-            "assessment_method": "Rule-based backup"
-        }
-    
-    async def batch_assess(self, papers: List[PaperInput]) -> List[AssessmentResult]:
-        """Batch processing concurrently for multiple papers"""
-        logger.info(f"📄 Processing {len(papers)} papers concurrently...")
-        
-        # Create an async task for each paper
-        tasks = [self.assess(paper) for paper in papers]
-        
-        # Run them all at the exact same time
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Clean up any exceptions that leaked through
-        final_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"❌ Failed to assess paper {i+1}: {result}")
-                final_results.append(self._create_error_result(papers[i], str(result)))
-            else:
-                final_results.append(result)
-                
-        return final_results
-    
-    def _create_error_result(self, paper: PaperInput, error: str) -> AssessmentResult:
-        """Create error result for failed assessments"""
-        return AssessmentResult(
-            metadata={"error": error, "assessment_method": "Failed"},
+            metadata={"assessment_method": "LLM Comprehensive", "paper_metadata": paper.metadata},
             reproducibility_assessment=ReproducibilityAssessment(
-                overall_score=0,
-                clarity=ComponentScore(score=0, feedback=f"Assessment failed: {error}", issues=[], strengths=[]),
-                completeness=ComponentScore(score=0, feedback="", issues=[], strengths=[]),
-                resource_availability=ComponentScore(score=0, feedback="", issues=[], strengths=[]),
-                replicability=ComponentScore(score=0, feedback="", issues=[], strengths=[])
+                overall_score=repro.get('overall_score', 0),
+                clarity=ComponentScore(score=repro.get('clarity_score', 0), feedback=repro.get('clarity_feedback', ""), issues=repro.get('clarity_issues', []), strengths=repro.get('clarity_strengths', [])),
+                completeness=ComponentScore(score=repro.get('completeness_score', 0), feedback=repro.get('completeness_feedback', ""), issues=repro.get('completeness_issues', []), strengths=repro.get('completeness_strengths', [])),
+                resource_availability=ComponentScore(score=repro.get('resource_availability_score', 0), feedback=repro.get('resource_availability_feedback', ""), issues=repro.get('missing_resources', []), strengths=repro.get('available_resources', [])),
+                replicability=ComponentScore(score=repro.get('replicability_score', 0), feedback=repro.get('replicability_feedback', ""), issues=repro.get('replicability_issues', []), strengths=repro.get('replicability_strengths', []))
             ),
             methodological_rigor=MethodologicalRigor(
-                overall_score=0,
-                study_design=ComponentScore(score=0, feedback="", issues=[], strengths=[]),
-                sample_adequacy=ComponentScore(score=0, feedback="", issues=[], strengths=[]),
-                evaluation_validity=ComponentScore(score=0, feedback="", issues=[], strengths=[]),
-                statistical_rigor=ComponentScore(score=0, feedback="", issues=[], strengths=[])
+                overall_score=rigor.get('overall_score', 0),
+                study_design=ComponentScore(score=rigor.get('study_design_score', 0), feedback=rigor.get('study_design_feedback', ""), issues=rigor.get('design_weaknesses', []), strengths=rigor.get('design_strengths', [])),
+                sample_adequacy=ComponentScore(score=rigor.get('sample_adequacy_score', 0), feedback=rigor.get('sample_adequacy_feedback', ""), issues=rigor.get('sample_concerns', []), strengths=rigor.get('sample_strengths', [])),
+                evaluation_validity=ComponentScore(score=rigor.get('evaluation_validity_score', 0), feedback=rigor.get('evaluation_validity_feedback', ""), issues=rigor.get('evaluation_issues', []), strengths=rigor.get('evaluation_strengths', [])),
+                statistical_rigor=ComponentScore(score=rigor.get('statistical_rigor_score', 0), feedback=rigor.get('statistical_rigor_feedback', ""), issues=rigor.get('statistical_issues', []), strengths=rigor.get('statistical_strengths', []))
             ),
-            identified_strengths=[],
-            identified_weaknesses=[f"Assessment failed: {error}"],
-            recommendations=["Please retry assessment or check paper format"],
-            confidence_score=0.0
+            identified_strengths=overall.get('key_strengths', []),
+            identified_weaknesses=overall.get('critical_weaknesses', []),
+            recommendations=overall.get('actionable_recommendations', []),
+            confidence_score=overall.get('confidence_level', 0.0)
+        )
+
+    def _rule_based_fallback(self, paper: PaperInput) -> AssessmentResult:
+        logger.warning("📋 Rule-based backup...")
+        score = 40 if len(paper.methodology) > 500 else 20
+        return AssessmentResult(
+            metadata={"assessment_method": "Rule-based fallback"},
+            reproducibility_assessment=ReproducibilityAssessment(
+                overall_score=score,
+                clarity=ComponentScore(score=score, feedback="Fallback"),
+                completeness=ComponentScore(score=score, feedback="Fallback"),
+                resource_availability=ComponentScore(score=0, feedback="N/A"),
+                replicability=ComponentScore(score=score, feedback="Fallback")
+            ),
+            methodological_rigor=MethodologicalRigor(
+                overall_score=score-5,
+                study_design=ComponentScore(score=score-5, feedback="Fallback"),
+                sample_adequacy=ComponentScore(score=score-5, feedback="Fallback"),
+                evaluation_validity=ComponentScore(score=score-5, feedback="Fallback"),
+                statistical_rigor=ComponentScore(score=score-5, feedback="Fallback")
+            ),
+            identified_strengths=["Structure present"],
+            identified_weaknesses=["Limited analysis"],
+            recommendations=["Check API configuration"],
+            confidence_score=0.1
         )
