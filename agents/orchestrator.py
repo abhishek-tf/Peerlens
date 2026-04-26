@@ -23,6 +23,8 @@ app.add_middleware(
 # --- Service Registry ---
 EXTRACTION_SERVICE_URL = "http://localhost:8000/extract" 
 METHODOLOGY_AGENT_URL = "http://localhost:8001/api/v1/assess"
+# CITAION_AGENT_URL = "http://localhost:8002/api/v1/assess"
+SUMMARY_AGENT_URL = "http://localhost:8002/api/v1/summarize"
 CITATION_AGENT_URL = "http://localhost:8003/api/v1/citation-report"
 # SUMMARY_AGENT_URL = "http://localhost:8003/api/v1/generate"
 
@@ -67,6 +69,8 @@ async def process_research_paper(file: UploadFile = File(...)):
             tasks = [
                 client.post(METHODOLOGY_AGENT_URL, json=agent_payload),
                 # Add Citation and Summary tasks here as they become ready:
+                # client.post(CITATION_AGENT_URL, json=agent_payload),
+                client.post(SUMMARY_AGENT_URL, json=agent_payload),
                 client.post(CITATION_AGENT_URL, json=agent_payload),
                 # client.post(SUMMARY_AGENT_URL, json=agent_payload),
             ]
@@ -83,6 +87,7 @@ async def process_research_paper(file: UploadFile = File(...)):
             }
 
             # Map the responses back to their respective agents
+            agent_names = ["methodology", "summarizer"] # Add "citation" later
             agent_names = ["methodology","citation"] # Add "citation", "summary" later
             
             for name, resp in zip(agent_names, responses):
