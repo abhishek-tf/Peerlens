@@ -6,10 +6,17 @@ import pdfplumber
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Dynamic Research Paper Extractor")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Define the directory where JSON files will be saved
 OUTPUT_DIR = "extracted_results"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

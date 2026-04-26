@@ -1,0 +1,6 @@
+{
+  "name": "PeerLens",
+  "description": "Smart peer review assistant with 3D research impact visualization and AI-powered paper analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["AI Analysis", "3D Visualization"]
+}
